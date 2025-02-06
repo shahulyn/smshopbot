@@ -1,0 +1,11 @@
+# Ignore all .log files
+*.log
+
+# Ignore the node_modules folder (for a Node.js project)
+node_modules/
+
+# Ignore all .env files
+.env
+
+# Ignore all files with .bak extension
+*.bak
