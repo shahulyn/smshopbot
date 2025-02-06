@@ -1,6 +1,7 @@
 import os
 import requests
 import imgkit
+import tempfile
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from datetime import datetime
@@ -11,25 +12,21 @@ load_dotenv()
 # Loyverse and Telegram API tokens
 LOYVERSE_ACCESS_TOKEN = os.getenv("LOYVERSE_ACCESS_TOKEN")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Telegram chat ID to send the image
 BASE_URL = "https://api.loyverse.com/v1.0"
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Telegram chat ID to send the image >
+
+# Ensure required environment variables exist
+if not all([LOYVERSE_ACCESS_TOKEN, BOT_TOKEN, TELEGRAM_CHAT_ID]):
+    raise ValueError("Missing environment variables. Check your .env file.")
+
 # Flask application
 app = Flask(__name__)
 
-# No longer used because we rely on webhook data.
-def get_latest_receipt():
-    url = f"{BASE_URL}/receipts?limit=1&order_by=-created_at"
-    headers = {"Authorization": f"Bearer {LOYVERSE_ACCESS_TOKEN}"}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        receipts = response.json().get("receipts", [])
-        return receipts[0] if receipts else None
-    else:
-        print(f"Error fetching receipt: {response.status_code}, {response.text}")
-        return None
-
 # Function to generate a receipt image
 def generate_receipt_image(receipt_data):
+    # Extract total amount correctly
+    total_amount = receipt_data.get("total_money", 0.0)  # Now correctly taken as float
+
     # HTML template for the receipt
     html_template = """
     <!DOCTYPE html>
@@ -61,24 +58,18 @@ def generate_receipt_image(receipt_data):
                 margin: 0 auto 10px;
                 height: 80px;
             }
-            h1, p {
-                text-align: center;
-                margin: 5px 0;
-            }
             h2 {
                 text-align: center;
-                margin: 5px 0;
                 font-size: 15px;
                 font-weight: bold;  
             }
             hr {
-               color: #666;
                 border-top: 1px dotted #aaa;    
-              
             }
             .total {
                 font-size: 24px;
                 font-weight: bold;
+                text-align: center;
             }
             .item {
                 display: flex;
@@ -97,17 +88,12 @@ def generate_receipt_image(receipt_data):
                 color: #666;
                 margin-bottom: 5px;  
             }
-            .total-text{
-              color: #666;
-              padding-bottom: 5px;
-            }
-            .footer-bottom{
-               text-align: center;
+            .footer-bottom {
+                text-align: center;
                 font-size: 10px;
                 color: #666;
             }
         </style>
-        
     </head>
     <body>
         <div class="receipt">
@@ -115,28 +101,17 @@ def generate_receipt_image(receipt_data):
             <h2>Chic Opulance</h2>
             <hr>
             <p class="total">MVR {total_amount:.2f}</p>
-            <p class="total-text">Total</p>
             <hr>
-            <div>
-             <span class="footer-inline">Employee: {employee_id}</span>
-             <span class="footer-inline">POS:{store_id}</span>
-            </div>
-           
-            <hr>
-            
             {line_items_html}
             <hr>
-
             <div class="item">
                 <strong>Total</strong>
                 <strong>MVR {total_amount:.2f}</strong>
             </div>
-            
             <div class="item">
-                <span>Transfer</span>
+                <span>Cash.payment type name</span>
                 <span>MVR {total_amount:.2f}</span>
             </div>
-            
             <hr>
             <p class="footer">Thank You!<br>BML Transfer: 7730000465147<br>Account Name: SM Shop<br>Viber/Telegram: 7620064</p>
             <div class="footer-inline">
@@ -154,7 +129,7 @@ def generate_receipt_image(receipt_data):
     for item in receipt_data.get("line_items", []):
         item_name = item.get("item_name", "Item")
         quantity = item.get("quantity", 0)
-        unit_price = item.get("price", 0)
+        unit_price = item.get("price", 0.0)
         line_total = quantity * unit_price
         line_items_html += f"""
         <div class="item">
@@ -164,54 +139,46 @@ def generate_receipt_image(receipt_data):
         <span class="footer-inline">{quantity} × MVR {unit_price:.2f}</span>
         """
 
-    # Fill in the template with actual data
+    # Fill in template
     receipt_html = html_template.format(
         receipt_number=receipt_data.get("receipt_number", "N/A"),
-        store_id=receipt_data.get("store_id", "N/A"),
-        employee_id=receipt_data.get("employee_id", "N/A"),
         server_time=datetime.now().strftime("%d/%m/%Y %H:%M"),
         line_items_html=line_items_html,
-        total_amount=receipt_data.get("total_money", 0)
+        total_amount=total_amount
     )
 
-    # Save the HTML and convert to image
-    html_path = "/tmp/receipt.html"
-    img_path = "/tmp/receipt.png"
+    # Save HTML and convert to image
+    html_path = tempfile.gettempdir() + "/receipt.html"
+    img_path = tempfile.gettempdir() + "/receipt.png"
     with open(html_path, "w") as file:
         file.write(receipt_html)
     
-    imgkit.from_file(html_path, img_path)
-    return img_path
+    try:
+        imgkit.from_file(html_path, img_path)
+        return img_path
+    except Exception as e:
+        print(f"Error generating image: {e}")
+        return None
 
-# Function to send the generated image to Telegram
+# Function to send image to Telegram
 def send_telegram_image(chat_id, img_path):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     with open(img_path, "rb") as photo:
         response = requests.post(url, files={"photo": photo}, data={"chat_id": chat_id})
-    if response.status_code == 200:
-        print(f"Image sent successfully to chat ID {chat_id}")
-    else:
-        print(f"Failed to send image: {response.status_code}, {response.text}")
+    print(f"Telegram response: {response.status_code}, {response.text}")
 
-# Webhook endpoint to handle new sales events
+# Webhook to handle receipts
 @app.route("/webhook", methods=["POST"])
 def handle_webhook():
     data = request.json
-    print("Webhook received data:", data)
-
-    # Extract receipt data from the webhook payload.
-    # The payload contains a key 'receipts' which is a list.
-    receipts = data.get("receipts")
-    if receipts and len(receipts) > 0:
-        receipt_data = receipts[0]
-        img_path = generate_receipt_image(receipt_data)
-        send_telegram_image(TELEGRAM_CHAT_ID, img_path)
-        os.remove(img_path)  # Clean up the temporary image
-    else:
-        print("No receipt data found.")
-
+    receipts = data.get("receipts", [])
+    if receipts:
+        img_path = generate_receipt_image(receipts[0])
+        if img_path:
+            send_telegram_image(TELEGRAM_CHAT_ID, img_path)
+            os.remove(img_path)
     return jsonify({"status": "ok"}), 200
 
-# Start the Flask application
+# Start Flask
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
