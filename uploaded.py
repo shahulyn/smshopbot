@@ -93,7 +93,7 @@ def generate_receipt_image(receipt_data):
                 font-weight: bold;
             }}
             hr {{
-                border-top: 1px dotted #aaa;
+                border-top: 1px dashed #aaa;
             }}
             .total {{
                 font-size: 24px;
@@ -120,7 +120,7 @@ def generate_receipt_image(receipt_data):
             .footer-bottom {{
                 text-align: center;
                 font-size: 10px;
-                margin-top: 10px;
+                margin-top: 20px;
                 color: #666;
             }}
              </style>
@@ -140,9 +140,9 @@ def generate_receipt_image(receipt_data):
             </div>
             {payment_html}
             <hr>
-            <p class="footer">Thank You!<br>BML Transfer: 7730000439913<br>Account Name: SM Shop<br>Viber/Telegram: 762>
+            <p class="footer">رمضان كريم<br>BML Transfer: 7730000439913<br>Account Name: SM Shop<br>Viber: 762>
             <div class="footer-inline">
-                <span>{datetime.now().strftime("%d/%m/%Y %H:%M")}</span>
+                <small>{datetime.now().strftime("%b %d, %Y %H:%M")}</small>
                 <span>Receipt № {receipt_data.get("receipt_number", "N/A")}</span>
             </div>
             <p class="footer-bottom"> made by @shahulyns.bot❤️</p>
